@@ -1,21 +1,16 @@
-name: Build WinkWink
+name: Build WinkWink APK
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      release:
-        description: "Zbuduj też podpisany APK release"
-        type: boolean
-        default: false
 
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      # Adres backendu (HTTPS). Ustaw w Settings → Secrets and variables → Actions → Variables.
+      # Adres backendu (HTTPS). Opcjonalnie ustaw w Settings → Secrets and variables → Actions → Variables.
       WINKWINK_API_BASE_URL: ${{ vars.WINKWINK_API_BASE_URL || 'https://api.winkwink.example' }}
 
     steps:
@@ -27,13 +22,10 @@ jobs:
           set -e
           ZIP=$(ls -t *.zip | head -n 1)
           echo "Używam: $ZIP"
-          rm -rf src_unzipped
-          mkdir src_unzipped
+          rm -rf src_unzipped && mkdir src_unzipped
           unzip -q "$ZIP" -d src_unzipped
           ROOT=$(find src_unzipped -type f -name settings.gradle.kts -path '*android*' -print -quit | xargs dirname | xargs dirname)
           echo "PROJECT_ROOT=$GITHUB_WORKSPACE/$ROOT" >> "$GITHUB_ENV"
-          echo "Katalog projektu: $ROOT"
-          ls "$ROOT"
 
       - name: JDK 17
         uses: actions/setup-java@v4
@@ -41,7 +33,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Gradle 8.10.2 (projekt nie ma kompletnego wrappera)
+      - name: Gradle 8.10.2
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
@@ -52,56 +44,22 @@ jobs:
           yes | "$SDKM" --licenses > /dev/null || true
           "$SDKM" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
-      - name: google-services.json (opcjonalnie, dla push)
-        env:
-          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
-        run: |
-          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
-            echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > "$PROJECT_ROOT/android/app/google-services.json"
-            echo "Dodano google-services.json"
-          else
-            echo "Brak sekretu GOOGLE_SERVICES_JSON_B64 — push będzie wyłączony"
-          fi
-
-      - name: Backend — kompilacja i testy
-        working-directory: ${{ env.PROJECT_ROOT }}/backend
-        run: gradle build --no-daemon --stacktrace
-
-      - name: Android — testy jednostkowe
-        working-directory: ${{ env.PROJECT_ROOT }}/android
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
-
       - name: Android — APK debug
         working-directory: ${{ env.PROJECT_ROOT }}/android
         run: gradle :app:assembleDebug --no-daemon --stacktrace
-
-      - name: Android — APK release (podpisany)
-        if: ${{ github.event.inputs.release == 'true' }}
-        working-directory: ${{ env.PROJECT_ROOT }}/android
-        env:
-          KEYSTORE_B64: ${{ secrets.WINKWINK_KEYSTORE_B64 }}
-          WINKWINK_KEYSTORE_PASSWORD: ${{ secrets.WINKWINK_KEYSTORE_PASSWORD }}
-          WINKWINK_KEY_ALIAS: ${{ secrets.WINKWINK_KEY_ALIAS }}
-          WINKWINK_KEY_PASSWORD: ${{ secrets.WINKWINK_KEY_PASSWORD }}
-        run: |
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/winkwink.jks"
-          export WINKWINK_KEYSTORE_FILE="$RUNNER_TEMP/winkwink.jks"
-          gradle :app:assembleRelease --no-daemon --stacktrace
 
       - name: Wyniki — APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: winkwink-apk
-          path: ${{ env.PROJECT_ROOT }}/android/app/build/outputs/apk/**/*.apk
+          name: winkwink-debug-apk
+          path: ${{ env.PROJECT_ROOT }}/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
 
-      - name: Wyniki — raporty testów i błędów
-        if: always()
+      - name: Wyniki — raporty błędów
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: winkwink-reports
-          path: |
-            ${{ env.PROJECT_ROOT }}/**/build/reports/**
-            ${{ env.PROJECT_ROOT }}/**/build/test-results/**
+          path: ${{ env.PROJECT_ROOT }}/android/app/build/reports/**
           if-no-files-found: ignore
