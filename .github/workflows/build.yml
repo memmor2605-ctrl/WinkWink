@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       # Adres backendu (HTTPS). Ustaw w Settings → Secrets and variables → Actions → Variables.
@@ -31,7 +31,7 @@ jobs:
           mkdir src_unzipped
           unzip -q "$ZIP" -d src_unzipped
           ROOT=$(find src_unzipped -type f -name settings.gradle.kts -path '*android*' -print -quit | xargs dirname | xargs dirname)
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "PROJECT_ROOT=$GITHUB_WORKSPACE/$ROOT" >> "$GITHUB_ENV"
           echo "Katalog projektu: $ROOT"
           ls "$ROOT"
 
@@ -46,8 +46,11 @@ jobs:
         with:
           gradle-version: 8.10.2
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Android SDK (licencje + platforma 35)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: google-services.json (opcjonalnie, dla push)
         env:
